@@ -1,138 +1,72 @@
 pipeline {
     agent any
 
-    tools {
-        jdk 'jdk17'
-        nodejs 'node23'
-    }
-
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        AWS_REGION = 'ap-south-1'
-        EKS_CLUSTER = 'zomato-cluster'
-        IMAGE_NAME = 'kastrov/zomato:latest'
+        DOCKER_IMAGE = "mrudulsmohan/zomato-react"
+        DOCKER_TAG   = "latest"
+        AWS_REGION   = "ap-south-1"
+        EKS_CLUSTER  = "zomato-cluster"
     }
 
     stages {
 
-        stage("Clean Workspace") {
+        stage('Checkout Code') {
             steps {
-                cleanWs()
+                git branch: 'main',
+                    url: 'https://github.com/mrudulsmohan/Zomato.git'
             }
         }
 
-        stage("Git Checkout") {
+        stage('Build Docker Image') {
             steps {
-                git 'https://github.com/KastroVKiran/Zomato-Project-Kastro.git'
+                sh '''
+                  docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                '''
             }
         }
 
-        stage("SonarQube Analysis") {
+        stage('Docker Login') {
             steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh """
-                    $SCANNER_HOME/bin/sonar-scanner \
-                    -Dsonar.projectName=zomato \
-                    -Dsonar.projectKey=zomato
-                    """
-                }
-            }
-        }
-
-        stage("Quality Gate") {
-            steps {
-                waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
-            }
-        }
-
-        stage("Install NPM Dependencies") {
-            steps {
-                sh 'npm install'
-            }
-        }
-
-        stage("OWASP Dependency Check") {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit -n',
-                odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
-
-        stage("Trivy File Scan") {
-            steps {
-                sh 'trivy fs . > trivy.txt'
-            }
-        }
-
-        stage("Build Docker Image") {
-            steps {
-                sh 'docker build -t zomato .'
-            }
-        }
-
-        stage("Push Image to DockerHub") {
-            steps {
-                withDockerRegistry(credentialsId: 'docker') {
+                withCredentials([string(credentialsId: 'dockerhub-creds', variable: 'DOCKER_PASS')]) {
                     sh '''
-                    docker tag zomato kastrov/zomato:latest
-                    docker push kastrov/zomato:latest
+                      echo "$DOCKER_PASS" | docker login -u mrudulsmohan --password-stdin
                     '''
                 }
             }
         }
 
-        stage("Docker Scout Scan") {
+        stage('Push Image to Docker Hub') {
             steps {
-                withDockerRegistry(credentialsId: 'docker') {
+                sh '''
+                  docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                '''
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
                     sh '''
-                    docker-scout quickview kastrov/zomato:latest
-                    docker-scout cves kastrov/zomato:latest
-                    docker-scout recommendations kastrov/zomato:latest
+                      aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER}
+                      kubectl apply -f k8s/deployment.yaml
+                      kubectl apply -f k8s/service.yaml
+                      kubectl get pods
+                      kubectl get svc
                     '''
                 }
             }
         }
-
-stage("Deploy to EKS") {
-    steps {
-        withCredentials([
-          [$class: 'AmazonWebServicesCredentialsBinding',
-           credentialsId: 'aws-creds']
-        ]) {
-            sh '''
-            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-            export AWS_DEFAULT_REGION=ap-south-1
-
-            aws eks update-kubeconfig \
-              --region ap-south-1 \
-              --name zomato-cluster
-
-            kubectl apply -f k8s/deployment.yaml
-            kubectl apply -f k8s/service.yaml
-            '''
-        }
-    }
-}
-
-
     }
 
     post {
-        always {
-            emailext(
-                attachLog: true,
-                subject: "Build ${currentBuild.result}",
-                body: """
-                <h3>Project: ${env.JOB_NAME}</h3>
-                <p>Build Number: ${env.BUILD_NUMBER}</p>
-                <p>URL: ${env.BUILD_URL}</p>
-                """,
-                to: 'kastrokiran@gmail.com',
-                mimeType: 'text/html',
-                attachmentsPattern: 'trivy.txt'
-            )
+        success {
+            echo "🎉 ZOMATO CI/CD PIPELINE COMPLETED SUCCESSFULLY"
+        }
+        failure {
+            echo "❌ PIPELINE FAILED — CHECK LOGS"
         }
     }
 }
