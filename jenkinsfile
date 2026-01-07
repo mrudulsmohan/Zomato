@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "mrudulsmohan/zomato-react"
-        DOCKER_TAG   = "latest"
-        AWS_REGION   = "ap-south-1"
-        EKS_CLUSTER  = "zomato-cluster"
+        AWS_REGION  = "ap-south-1"
+        EKS_CLUSTER = "zomato-cluster"
+        IMAGE_NAME  = "mrudulsmohan/zomato-react"
+        IMAGE_TAG   = "latest"
     }
 
     stages {
@@ -19,7 +19,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .'
+                sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .'
             }
         }
 
@@ -28,7 +28,7 @@ pipeline {
                 withCredentials([string(credentialsId: 'dockerhub-creds', variable: 'DOCKER_PASS')]) {
                     sh '''
                       echo "$DOCKER_PASS" | docker login -u mrudulsmohan --password-stdin
-                      docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                      docker push ${IMAGE_NAME}:${IMAGE_TAG}
                     '''
                 }
             }
