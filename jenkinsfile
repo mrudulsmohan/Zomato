@@ -17,9 +17,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh '''
-                docker build -t ${DOCKER_IMAGE} .
-                '''
+                sh 'docker build -t ${DOCKER_IMAGE} .'
             }
         }
 
@@ -32,18 +30,14 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )
                 ]) {
-                    sh '''
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                    '''
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                 }
             }
         }
 
         stage('Push Image to Docker Hub') {
             steps {
-                sh '''
-                docker push ${DOCKER_IMAGE}
-                '''
+                sh 'docker push ${DOCKER_IMAGE}'
             }
         }
 
@@ -54,29 +48,20 @@ pipeline {
                      credentialsId: 'aws-creds']
                 ]) {
                     sh '''
-                    echo "================ AWS IDENTITY ================"
+                    echo "===== AWS IDENTITY ====="
                     aws sts get-caller-identity
 
-                    echo "================ UPDATE KUBECONFIG ================"
+                    echo "===== UPDATE KUBECONFIG ====="
                     aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER}
 
-                    echo "================ CLUSTER ACCESS ================"
+                    echo "===== CLUSTER ACCESS ====="
                     kubectl get nodes
 
-                    echo "================ DEPLOYING APP ================"
+                    echo "===== DEPLOY APP ====="
                     kubectl apply -f k8s/deployment.yaml
                     '''
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            echo "✅ Pipeline completed successfully"
-        }
-        failure {
-            echo "❌ Pipeline failed"
         }
     }
 }
