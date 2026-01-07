@@ -23,19 +23,14 @@ pipeline {
             }
         }
 
-        stage('Docker Login') {
+        stage('Docker Login & Push') {
             steps {
                 withCredentials([string(credentialsId: 'dockerhub-creds', variable: 'DOCKER_PASS')]) {
                     sh '''
                       echo "$DOCKER_PASS" | docker login -u mrudulsmohan --password-stdin
+                      docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
                     '''
                 }
-            }
-        }
-
-        stage('Push Image to Docker Hub') {
-            steps {
-                sh 'docker push ${DOCKER_IMAGE}:${DOCKER_TAG}'
             }
         }
 
@@ -60,15 +55,6 @@ pipeline {
                     '''
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            echo "✅ ZOMATO APP DEPLOYED SUCCESSFULLY TO EKS"
-        }
-        failure {
-            echo "❌ DEPLOYMENT FAILED – CHECK LOGS"
         }
     }
 }
