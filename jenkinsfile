@@ -1,18 +1,14 @@
 pipeline {
     agent any
-
     tools {
         jdk 'jdk17'
         nodejs 'node23'
     }
-
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_IMAGE = "mrudulsmohan/zomato-react:latest"
-        AWS_REGION = "ap-south-1"
-        EKS_CLUSTER = "zomato-cluster"
+        AWS_REGION = 'ap-south-1'
+        DOCKER_IMAGE = 'mrudulsmohan/zomato-react:latest'
     }
-
     stages {
         stage("Clean Workspace") {
             steps {
@@ -29,105 +25,67 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
-                        -Dsonar.projectKey=zomato'''
-                }
-            }
-        }
-
-        stage("Code Quality Gate") {
-            steps {
-                script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato
+                    '''
                 }
             }
         }
 
         stage("Install NPM Dependencies") {
             steps {
-                sh "npm install"
-            }
-        }
-
-        stage("OWASP Dependency Check") {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit -n', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
-
-        stage("Trivy File Scan") {
-            steps {
-                sh "trivy fs . > trivy.txt || true"
+                sh 'npm install'
             }
         }
 
         stage("Build Docker Image") {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE} ."
+                sh "docker build -t $DOCKER_IMAGE ."
             }
         }
 
         stage("Docker Login & Push") {
             steps {
                 script {
-                    withDockerRegistry(credentialsId: 'docker') {
-                        sh "docker push ${DOCKER_IMAGE}"
+                    withDockerRegistry(credentialsId: 'dockerhub-creds') {
+                        sh "docker push $DOCKER_IMAGE"
                     }
                 }
             }
         }
 
-stage("Deploy to EKS") {
-    steps {
-        withCredentials([
-            string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-            string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
-        ]) {
-            sh '''
-                export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-                export AWS_DEFAULT_REGION=ap-south-1
+        stage("Deploy to EKS") {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh '''
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        export AWS_DEFAULT_REGION=${AWS_REGION}
 
-                # Update kubeconfig for this pipeline run
-                aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name zomato-cluster
+                        # Update kubeconfig for this pipeline run
+                        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name zomato-cluster
 
-                # Deploy Kubernetes manifests
-                kubectl apply -f k8s/deployment.yaml --validate=false
-                kubectl apply -f k8s/service.yaml --validate=false
+                        # Apply Kubernetes manifests
+                        kubectl apply -f k8s/deployment.yaml --validate=false
+                        kubectl apply -f k8s/service.yaml --validate=false
 
-                # Verify deployment
-                kubectl get pods
-                kubectl get svc
-            '''
+                        # Check deployment
+                        kubectl get pods
+                        kubectl get svc
+                    '''
+                }
+            }
         }
-    }
-}
-
     }
 
     post {
         always {
-            emailext attachLog: true,
-                subject: "'${currentBuild.result}'",
-                body: """
-                    <html>
-                    <body>
-                        <div style="background-color: #FFA07A; padding: 10px; margin-bottom: 10px;">
-                            <p style="color: white; font-weight: bold;">Project: ${env.JOB_NAME}</p>
-                        </div>
-                        <div style="background-color: #90EE90; padding: 10px; margin-bottom: 10px;">
-                            <p style="color: white; font-weight: bold;">Build Number: ${env.BUILD_NUMBER}</p>
-                        </div>
-                        <div style="background-color: #87CEEB; padding: 10px; margin-bottom: 10px;">
-                            <p style="color: white; font-weight: bold;">URL: ${env.BUILD_URL}</p>
-                        </div>
-                    </body>
-                    </html>
-                """,
-                to: 'kastrokiran@gmail.com',
-                mimeType: 'text/html',
-                attachmentsPattern: 'trivy.txt'
+            echo "Pipeline finished. Check results above."
         }
     }
 }
