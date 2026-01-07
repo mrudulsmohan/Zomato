@@ -1,10 +1,12 @@
 pipeline {
     agent any
+
     environment {
         DOCKER_IMAGE = 'mrudulsmohan/zomato-react:latest'
         AWS_REGION = 'ap-south-1'
         CLUSTER_NAME = 'zomato-cluster'
     }
+
     stages {
         stage('Checkout') {
             steps {
@@ -40,10 +42,10 @@ pipeline {
                         export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
                         export AWS_DEFAULT_REGION=$AWS_REGION
 
-                        # Update kubeconfig and deploy in the same shell
+                        # Update kubeconfig and deploy in the same shell block
                         aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
 
-                        # Apply Kubernetes manifests
+                        # Deploy
                         kubectl apply -f k8s/deployment.yaml --validate=false
                         kubectl apply -f k8s/service.yaml --validate=false
 
@@ -55,9 +57,10 @@ pipeline {
             }
         }
     }
+
     post {
         always {
-            echo 'Pipeline finished.'
+            echo "Pipeline finished."
         }
     }
 }
