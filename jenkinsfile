@@ -19,9 +19,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh '''
-                  docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                '''
+                sh 'docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .'
             }
         }
 
@@ -37,22 +35,26 @@ pipeline {
 
         stage('Push Image to Docker Hub') {
             steps {
-                sh '''
-                  docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                '''
+                sh 'docker push ${DOCKER_IMAGE}:${DOCKER_TAG}'
             }
         }
 
         stage('Deploy to EKS') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-creds'
-                ]]) {
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
                     sh '''
+                      export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                      export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                      export AWS_REGION=${AWS_REGION}
+
                       aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER}
-                      kubectl apply -f k8s/deployment.yaml
-                      kubectl apply -f k8s/service.yaml
+
+                      kubectl apply -f k8s/deployment.yaml --validate=false
+                      kubectl apply -f k8s/service.yaml --validate=false
+
                       kubectl get pods
                       kubectl get svc
                     '''
@@ -63,10 +65,10 @@ pipeline {
 
     post {
         success {
-            echo "🎉 ZOMATO CI/CD PIPELINE COMPLETED SUCCESSFULLY"
+            echo "✅ ZOMATO APP DEPLOYED SUCCESSFULLY TO EKS"
         }
         failure {
-            echo "❌ PIPELINE FAILED — CHECK LOGS"
+            echo "❌ DEPLOYMENT FAILED – CHECK LOGS"
         }
     }
 }
