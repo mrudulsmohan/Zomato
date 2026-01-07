@@ -1,43 +1,35 @@
 pipeline {
     agent any
-    tools {
-        jdk 'jdk17'
-        nodejs 'node23'
-    }
     environment {
         DOCKER_IMAGE = 'mrudulsmohan/zomato-react:latest'
         AWS_REGION = 'ap-south-1'
+        CLUSTER_NAME = 'zomato-cluster'
     }
     stages {
-        stage("Clean Workspace") {
-            steps { cleanWs() }
-        }
-
-        stage("Git Checkout") {
+        stage('Checkout Code') {
             steps {
                 git url: 'https://github.com/mrudulsmohan/Zomato.git', credentialsId: 'dockerhub-creds'
             }
         }
 
-        stage("Install NPM Dependencies") {
-            steps { sh 'npm install' }
-        }
-
-        stage("Build Docker Image") {
-            steps { sh "docker build -t $DOCKER_IMAGE ." }
-        }
-
-        stage("Docker Login & Push") {
+        stage('Build Docker Image') {
             steps {
-                script {
-                    withDockerRegistry(credentialsId: 'dockerhub-creds') {
-                        sh "docker push $DOCKER_IMAGE"
-                    }
+                sh "docker build -t $DOCKER_IMAGE ."
+            }
+        }
+
+        stage('Docker Login & Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push $DOCKER_IMAGE
+                    '''
                 }
             }
         }
 
-        stage("Deploy to EKS") {
+        stage('Deploy to EKS') {
             steps {
                 withCredentials([
                     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
@@ -48,11 +40,14 @@ pipeline {
                         export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
                         export AWS_DEFAULT_REGION=${AWS_REGION}
 
-                        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name zomato-cluster
+                        # Update kubeconfig for EKS cluster
+                        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
 
+                        # Deploy Kubernetes resources
                         kubectl apply -f k8s/deployment.yaml --validate=false
                         kubectl apply -f k8s/service.yaml --validate=false
 
+                        # Verify
                         kubectl get pods
                         kubectl get svc
                     '''
@@ -60,8 +55,9 @@ pipeline {
             }
         }
     }
-
     post {
-        always { echo "Pipeline finished. Check logs above." }
+        always {
+            echo 'Pipeline finished. Check logs for details.'
+        }
     }
 }
