@@ -94,23 +94,28 @@ pipeline {
             }
         }
 
-        stage("Deploy to EKS") {
-            steps {
-                withCredentials([
-                  [$class: 'AmazonWebServicesCredentialsBinding',
-                   credentialsId: 'aws-creds']
-                ]) {
-                    sh '''
-                    aws eks update-kubeconfig \
-                    --region $AWS_REGION \
-                    --name $EKS_CLUSTER
+stage("Deploy to EKS") {
+    steps {
+        withCredentials([
+          [$class: 'AmazonWebServicesCredentialsBinding',
+           credentialsId: 'aws-creds']
+        ]) {
+            sh '''
+            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+            export AWS_DEFAULT_REGION=ap-south-1
 
-                    kubectl apply -f k8s/deployment.yaml
-                    kubectl apply -f k8s/service.yaml
-                    '''
-                }
-            }
+            aws eks update-kubeconfig \
+              --region ap-south-1 \
+              --name zomato-cluster
+
+            kubectl apply -f k8s/deployment.yaml
+            kubectl apply -f k8s/service.yaml
+            '''
         }
+    }
+}
+
     }
 
     post {
