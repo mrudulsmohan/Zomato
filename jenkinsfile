@@ -1,66 +1,63 @@
 pipeline {
     agent any
-
     environment {
-        DOCKER_IMAGE = 'mrudulsmohan/zomato-react:latest'
-        AWS_REGION = 'ap-south-1'
-        CLUSTER_NAME = 'zomato-cluster'
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        AWS_CREDENTIALS = credentials('aws-creds') // Add your AWS credentials here
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        EKS_CLUSTER_NAME = 'zomato-cluster'
     }
-
     stages {
-        stage('Checkout') {
+
+        stage('Checkout SCM') {
             steps {
-                git url: 'https://github.com/mrudulsmohan/Zomato.git', credentialsId: 'dockerhub-creds'
+                checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t $DOCKER_IMAGE ."
+                sh 'docker build -t mrudulsmohan/zomato-react:latest .'
             }
         }
 
-        stage('Docker Login & Push') {
+        stage('Docker Login') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker push $DOCKER_IMAGE
-                    '''
+                sh """
+                echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                """
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                sh 'docker push mrudulsmohan/zomato-react:latest'
+            }
+        }
+
+        stage('Configure kubeconfig') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh """
+                    aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+                    """
                 }
             }
         }
 
         stage('Deploy to EKS') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                // Use the same AWS credentials for kubectl
+                withEnv([
+                    "AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}",
+                    "AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}",
+                    "AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
                 ]) {
-                    sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-                        export AWS_DEFAULT_REGION=$AWS_REGION
-
-                        # Update kubeconfig and deploy in the same shell block
-                        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
-
-                        # Deploy
-                        kubectl apply -f k8s/deployment.yaml --validate=false
-                        kubectl apply -f k8s/service.yaml --validate=false
-
-                        # Verify deployment
-                        kubectl get pods
-                        kubectl get svc
-                    '''
+                    sh 'kubectl apply -f k8s/deployment.yaml'
                 }
             }
-        }
-    }
-
-    post {
-        always {
-            echo "Pipeline finished."
         }
     }
 }
